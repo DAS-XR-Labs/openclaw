@@ -38,7 +38,7 @@ const VickyPlugin: OpenClawPluginDefinition = {
       const args = event.params;
 
       logger?.debug?.(`[VickyPlugin] Checking permission for tool: ${toolName}`);
-
+      logger?.debug?.call(logger, `[VickyPlugin] Checking permission for tool: `);
       try {
         const decision = await client.checkPermission({
           toolName,
@@ -51,7 +51,7 @@ const VickyPlugin: OpenClawPluginDefinition = {
 
         if (decision.action === "ALLOW") {
           logger?.debug?.(`[VickyPlugin] Allowed ${toolName} (${decision.tier})`);
-          return;
+          logger?.debug?.call(logger, `[VickyPlugin] Allowed  ()`);
         }
 
         if (decision.action === "BLOCK") {
