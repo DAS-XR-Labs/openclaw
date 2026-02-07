@@ -4,7 +4,29 @@ import { promisify } from "node:util";
 
 import { danger, shouldLogVerbose } from "../globals.js";
 import { logDebug, logError } from "../logger.js";
+
 import { resolveCommandStdio } from "./spawn-utils.js";
+
+import { VickyClient } from "../plugins/vicky-client.js";
+
+const vicky = new VickyClient();
+
+async function gateExec(command: string, args: string[]) {
+  const decision = await vicky.checkPermission({
+    toolName: "exec",
+    arguments: {
+      argv: [command, ...args],
+      cwd: process.cwd(), // We don't always have exact cwd here, but argv is key
+    },
+  });
+
+  if (decision.action !== "ALLOW") {
+    throw new Error(
+      `Vicky Gatekeeper Blocked: ${decision.action} (${decision.tier}) - ${"blockReason" in decision ? decision.blockReason : "Policy Denied"
+      }`
+    );
+  }
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -14,14 +36,17 @@ export async function runExec(
   args: string[],
   opts: number | { timeoutMs?: number; maxBuffer?: number } = 10_000,
 ): Promise<{ stdout: string; stderr: string }> {
+  // Gate Execution
+  await gateExec(command, args);
+
   const options =
     typeof opts === "number"
       ? { timeout: opts, encoding: "utf8" as const }
       : {
-          timeout: opts.timeoutMs,
-          maxBuffer: opts.maxBuffer,
-          encoding: "utf8" as const,
-        };
+        timeout: opts.timeoutMs,
+        maxBuffer: opts.maxBuffer,
+        encoding: "utf8" as const,
+      };
   try {
     const { stdout, stderr } = await execFileAsync(command, args, options);
     if (shouldLogVerbose()) {
@@ -61,6 +86,9 @@ export async function runCommandWithTimeout(
   argv: string[],
   optionsOrTimeout: number | CommandOptions,
 ): Promise<SpawnResult> {
+  // Gate Execution
+  await gateExec(argv[0] ?? "unknown", argv.slice(1));
+
   const options: CommandOptions =
     typeof optionsOrTimeout === "number" ? { timeoutMs: optionsOrTimeout } : optionsOrTimeout;
   const { timeoutMs, cwd, input, env } = options;

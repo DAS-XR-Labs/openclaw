@@ -49,6 +49,8 @@ import {
   stripPluginOnlyAllowlist,
 } from "./tool-policy.js";
 import { getPluginToolMeta } from "../plugins/tools.js";
+import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
+import { wrapToolWithHooks } from "./pi-tools.hooks.js";
 import { logWarn } from "../logger.js";
 
 function isOpenAIProvider(provider?: string) {
@@ -285,11 +287,11 @@ export function createOpenClawCodingTools(options?: {
     notifyOnExit: options?.exec?.notifyOnExit ?? execConfig.notifyOnExit,
     sandbox: sandbox
       ? {
-          containerName: sandbox.containerName,
-          workspaceDir: sandbox.workspaceDir,
-          containerWorkdir: sandbox.containerWorkdir,
-          env: sandbox.docker.env,
-        }
+        containerName: sandbox.containerName,
+        workspaceDir: sandbox.workspaceDir,
+        containerWorkdir: sandbox.containerWorkdir,
+        env: sandbox.docker.env,
+      }
       : undefined,
   });
   const processTool = createProcessTool({
@@ -300,9 +302,9 @@ export function createOpenClawCodingTools(options?: {
     !applyPatchEnabled || (sandboxRoot && !allowWorkspaceWrites)
       ? null
       : createApplyPatchTool({
-          cwd: sandboxRoot ?? workspaceRoot,
-          sandboxRoot: sandboxRoot && allowWorkspaceWrites ? sandboxRoot : undefined,
-        });
+        cwd: sandboxRoot ?? workspaceRoot,
+        sandboxRoot: sandboxRoot && allowWorkspaceWrites ? sandboxRoot : undefined,
+      });
   const tools: AnyAgentTool[] = [
     ...base,
     ...(sandboxRoot
@@ -423,9 +425,26 @@ export function createOpenClawCodingTools(options?: {
   // Always normalize tool JSON Schemas before handing them to pi-agent/pi-ai.
   // Without this, some providers (notably OpenAI) will reject root-level union schemas.
   const normalized = subagentFiltered.map(normalizeToolParameters);
+  // Wrap tools with global hooks (Vicky Gatekeeper, etc.)
+  const hookRunner = getGlobalHookRunner();
+  const hookContext = {
+    config: options?.config,
+    workspaceDir: options?.workspaceDir,
+    agentDir: options?.agentDir,
+    agentId,
+    sessionKey: options?.sessionKey,
+    messageChannel: options?.messageProvider,
+    agentAccountId: options?.agentAccountId,
+    sandboxed: !!sandbox,
+  };
+
+  const withHooks = normalized.map((tool) =>
+    wrapToolWithHooks(tool, hookRunner, hookContext)
+  );
+
   const withAbort = options?.abortSignal
-    ? normalized.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
-    : normalized;
+    ? withHooks.map((tool) => wrapToolWithAbortSignal(tool, options.abortSignal))
+    : withHooks;
 
   // NOTE: Keep canonical (lowercase) tool names here.
   // pi-ai's Anthropic OAuth transport remaps tool names to Claude Code-style names

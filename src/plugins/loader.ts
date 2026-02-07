@@ -21,12 +21,14 @@ import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./
 import { createPluginRuntime } from "./runtime/index.js";
 import { setActivePluginRegistry } from "./runtime.js";
 import { validateJsonSchemaValue } from "./schema-validator.js";
+import VickyPlugin from "./vicky-plugin.js";
 import type {
   OpenClawPluginDefinition,
   OpenClawPluginModule,
   PluginDiagnostic,
   PluginLogger,
 } from "./types.js";
+import type { PluginCandidate } from "./discovery.js";
 
 export type PluginLoadResult = PluginRegistry;
 
@@ -107,8 +109,8 @@ function resolvePluginModuleExport(moduleExport: unknown): {
 } {
   const resolved =
     moduleExport &&
-    typeof moduleExport === "object" &&
-    "default" in (moduleExport as Record<string, unknown>)
+      typeof moduleExport === "object" &&
+      "default" in (moduleExport as Record<string, unknown>)
       ? (moduleExport as { default: unknown }).default
       : moduleExport;
   if (typeof resolved === "function") {
@@ -206,14 +208,94 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   });
   pushDiagnostics(registry.diagnostics, manifestRegistry.diagnostics);
 
+  // Inject VickyPlugin (High Priority)
+  // We register it manually into the discovery candidates or directly into the registry if its structure allows. 
+  // For now, simpler to push it as a candidate with a virtual path, or handle it as a special case.
+  // Given loader logic iterates candidates, let's inject a synthetic candidate for Vicky.
+
+  // NOTE: This approach injects it as if it were discovered.
+  // Alternatively, we can register it via a direct call if we had a manual registry method exposed here, 
+  // but `loadOpenClawPlugins` builds everything from candidates.
+
+  // Let's create a synthetic candidate for VickyPlugin.
+  // We'll use a virtual path for source.
+  const vickyCandidate: PluginCandidate = {
+    idHint: VickyPlugin.id!,
+    source: "virtual:vicky-plugin", // Virtual source
+    rootDir: "",
+    origin: "bundled",
+    workspaceDir: undefined,
+  };
+
+  // We need to resolve the module export. Jiti won't load "virtual:..."
+  // So we must handle the "load" step specially for this candidate or modify the loop.
+  // Better approach: Let's modify the loop to accept pre-loaded definitions if possible, or 
+  // simply append to `registry.plugins` manually after the loop, but that skips validation logic in the loop.
+
+  // Actually, the loop uses `jiti` to load. 
+  // Let's modify the loop logic to handle our specific case OR just add it to candidates and mock jiti for it? 
+  // Mocking jiti inside this function is hard.
+
+  // Simplest minimal change:
+  // Add Vicky components directly to the registry *after* the loop, 
+  // mimicking what the loop does but skipping the file load.
+
+  {
+    const record = createPluginRecord({
+      id: VickyPlugin.id!,
+      name: VickyPlugin.name,
+      description: VickyPlugin.description,
+      version: VickyPlugin.version,
+      source: "virtual:vicky-plugin",
+      origin: "bundled",
+      workspaceDir: undefined,
+      enabled: true, // Always enabled unless config says otherwise?
+      configSchema: Boolean(VickyPlugin.configSchema),
+    });
+
+    record.kind = VickyPlugin.kind;
+    // We assume config is valid or empty for now, or validate it manually.
+    // Logic for config validation:
+    const entry = normalized.entries[VickyPlugin.id!];
+    const validatedConfig = validatePluginConfig({
+      schema: VickyPlugin.configSchema,
+      cacheKey: "vicky-config-schema",
+      value: entry?.config,
+    });
+
+    if (validatedConfig.ok) {
+      const api = createApi(record, {
+        config: cfg,
+        pluginConfig: validatedConfig.value
+      });
+
+      try {
+        if (VickyPlugin.activate) {
+          VickyPlugin.activate(api);
+        }
+        if (VickyPlugin.register) {
+          VickyPlugin.register(api);
+        }
+        registry.plugins.push(record);
+      } catch (e) {
+        logger.error(`[plugins] VickyPlugin failed to activate: ${e}`);
+        record.status = "error";
+        record.error = String(e);
+        registry.plugins.push(record);
+      }
+    } else {
+      logger.error(`[plugins] VickyPlugin config invalid: ${validatedConfig.errors}`);
+    }
+  }
+
   const pluginSdkAlias = resolvePluginSdkAlias();
   const jiti = createJiti(import.meta.url, {
     interopDefault: true,
     extensions: [".ts", ".tsx", ".mts", ".cts", ".mtsx", ".ctsx", ".js", ".mjs", ".cjs", ".json"],
     ...(pluginSdkAlias
       ? {
-          alias: { "openclaw/plugin-sdk": pluginSdkAlias },
-        }
+        alias: { "openclaw/plugin-sdk": pluginSdkAlias },
+      }
       : {}),
   });
 
