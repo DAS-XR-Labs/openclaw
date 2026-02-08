@@ -4,7 +4,7 @@ import { VickyClient, PolicyDeniedError } from "./vicky-client.js";
 const client = new VickyClient();
 
 const VickyPlugin: OpenClawPluginDefinition = {
-  id: "vicky-gatekeeper",
+  id: "vicky",
   name: "Vicky Gatekeeper",
   description: "Enforces security policies via external Vicky service",
   version: "1.0.0",
@@ -24,7 +24,12 @@ const VickyPlugin: OpenClawPluginDefinition = {
 
   activate: (api) => {
     const logger = api.logger;
-    const config = api.pluginConfig as { enabled?: boolean; vickyUrl?: string };
+    const rawConfig = api.pluginConfig as { enabled?: boolean; vickyUrl?: string } | undefined;
+
+    const config = {
+      enabled: rawConfig?.enabled ?? true,
+      vickyUrl: rawConfig?.vickyUrl ?? "http://127.0.0.1:3000",
+    };
 
     if (config.enabled === false) {
       logger.info("[VickyPlugin] Disabled by configuration");
