@@ -36,8 +36,11 @@ if (!process.env.VICKY_SECRET_TOKEN) {
 }
 
 export class VickyClient {
-    private static readonly baseUrl: string = "http://127.0.0.1:3000";
-    private static readonly timeoutMs: number = 300;
+    private static get baseUrl(): string {
+        return process.env.VICKY_BASE_URL || "http://127.0.0.1:3000";
+    }
+    private static readonly CHECKS_TIMEOUT = 300;
+    private static readonly TEXT_TIMEOUT = 1500;
     private static readonly maxRetries: number = 2;
 
     /**
@@ -57,12 +60,13 @@ export class VickyClient {
             attempt++;
             try {
                 const controller = new AbortController();
-                const id = setTimeout(() => controller.abort(), this.timeoutMs);
+                const id = setTimeout(() => controller.abort(), this.CHECKS_TIMEOUT);
 
                 const response = await fetch(`${this.baseUrl}/api/check-permission`, {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/json",
+                        "x-openclaw-session-id": request.metadata?.sessionKey || "",
                         "x-vicky-token": secretToken
                     },
                     body: JSON.stringify(request),
@@ -79,47 +83,26 @@ export class VickyClient {
                 if (response.status >= 500) {
                     throw new Error(`Vicky API Server Error: ${response.status}`);
                 }
-
-                // 4xx errors are client/policy confusion, treated as failure but likely not retried if it was protocol error.
-                // But for safety, we treat known 4xx as non-retriable fatal.
                 throw new Error(`Vicky API Client Error: ${response.status}`);
             } catch (err: unknown) {
                 lastError = err;
                 const isTimeout = err instanceof Error && err.name === "AbortError";
-                // Retry only on Timeout or 5xx-like fetch errors (network)
-                // If it's a fetch error (TypeError typically for network), we retry.
                 const isNetworkError =
                     err instanceof TypeError || (err instanceof Error && err.message.includes("fetch"));
                 const isServerError = err instanceof Error && err.message.includes("Vicky API Server Error");
 
                 if (!isTimeout && !isNetworkError && !isServerError) {
-                    // Break immediately on non-transient errors
                     break;
                 }
 
-                // If we have retries left, loop
                 if (attempt <= this.maxRetries) {
-                    // optionally small backoff? PRP says "retry", doesn't specify backoff.
-                    // Immediate retry for tight 300ms budget is usually better.
                     continue;
                 }
             }
         }
 
-        // Fallback Matrix
-        // If we are here, we exhausted retries or hit a fatal error.
-        // Default to Fail-Closed (BLOCK).
-        // In a real scenario, we might want Fail-Open for LOW risk if mapped locally,
-        // but without local policy cache, we must be safe.
-        // PRP: "Apply fallback matrix by risk tier". Using stricter default for now.
-
-        // Check if tool is obviously low risk? 
-        // We don't have local risk map. We assume "HIGH".
-
-        // Log failure
         console.error(`[VickyClient] Check permission failed after ${attempt} attempts:`, lastError);
 
-        // Default Fail-Closed
         return {
             action: "BLOCK",
             tier: "HIGH",
@@ -129,6 +112,7 @@ export class VickyClient {
 
     /**
      * Anonymize text by calling Vicky API.
+     * Fails-closed: throws error if Vicky is unreachable.
      */
     static async anonymize(text: string, sessionKey: string): Promise<string> {
         return this.handleTextRequest(text, sessionKey, "/api/anonymize", "sanitizedText");
@@ -136,25 +120,22 @@ export class VickyClient {
 
     /**
      * Restore original text by calling Vicky API.
+     * Fails-closed: throws error if Vicky is unreachable.
      */
     static async restore(text: string, sessionKey: string): Promise<string> {
-        try {
-            return await this.handleTextRequest(text, sessionKey, "/api/deanonymize", "originalText");
-        } catch (err) {
-            // Fail-closed for restoration means we return the sanitized text?
-            // User requested fail-closed for tool execution.
-            // But for simple string restore, re-throwing ensures the caller handles the failure.
-            throw err;
-        }
+        return this.handleTextRequest(text, sessionKey, "/api/deanonymize", "originalText");
     }
 
     /**
      * Recursively scan and restore strings within an object/array.
+     * - Idempotent
+     * - Handles nested objects/arrays
+     * - Leaves non-string primitives alone
      */
     static async restoreRecursive(params: any, sessionKey: string): Promise<any> {
         if (typeof params === "string") {
-            // Optimization: Only call API if it looks like a placeholder
-            if (this.looksLikePlaceholder(params)) {
+            // Optimization: Only call API if it contains a placeholder
+            if (this.containsPlaceholder(params)) {
                 return this.restore(params, sessionKey);
             }
             return params;
@@ -176,11 +157,10 @@ export class VickyClient {
     }
 
 
-    private static looksLikePlaceholder(text: string): boolean {
-        // Simple heuristic to avoid API calls for obviously safe strings
-        // Placeholders usually look like EMAIL_01, PHONE_01, etc.
-        // User requested STRICT regex: /^[A-Z]+_\d+$/
-        return /^[A-Z]+_\d+$/.test(text);
+    public static containsPlaceholder(text: string): boolean {
+        // Relaxed Regex: "Contains Placeholder" (e.g. "Call EMAIL_01 now")
+        // Uses word boundaries to avoid partial matches on normal words.
+        return /\b[A-Z]+_\d+\b/.test(text);
     }
 
 
@@ -195,7 +175,7 @@ export class VickyClient {
             attempt++;
             try {
                 const controller = new AbortController();
-                const id = setTimeout(() => controller.abort(), this.timeoutMs);
+                const id = setTimeout(() => controller.abort(), this.TEXT_TIMEOUT);
 
                 const response = await fetch(`${this.baseUrl}${endpoint}`, {
                     method: "POST",
@@ -236,6 +216,6 @@ export class VickyClient {
                 }
             }
         }
-        throw lastError || new Error("Unknown error");
+        throw lastError || new Error(`Vicky Service Unreachable (${endpoint}): ${lastError}`);
     }
 }

@@ -38,7 +38,7 @@ const VickyPlugin: OpenClawPluginDefinition = {
             const args = event.params;
             const sessionKey = ctx.sessionKey || ""; // Fix undefined sessionKey
 
-            logger.debug(`[VickyPlugin] Checking permission for tool: ${toolName}`);
+            logger.debug?.(`[VickyPlugin] Checking permission for tool: ${toolName}`);
 
             try {
                 // 1. JIT Restore: Restore PII in arguments so the tool receives real values.
@@ -55,7 +55,7 @@ const VickyPlugin: OpenClawPluginDefinition = {
                 });
 
                 if (decision.action === "ALLOW") {
-                    logger.debug(`[VickyPlugin] Allowed ${toolName} (${decision.tier})`);
+                    logger.debug?.(`[VickyPlugin] Allowed ${toolName} (${decision.tier})`);
                     // Return the restored arguments to the tool runner
                     return {
                         params: restoredArgs,

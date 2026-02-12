@@ -107,7 +107,7 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     deliver: async (payload) => {
       // VICKY RESTORE
       let restoredPayload = payload;
-      if (payload.text) {
+      if (payload.text && VickyClient.containsPlaceholder(payload.text)) {
         try {
           // Use SessionKey from the prepared message context
           const sessionKey = prepared.ctxPayload.SessionKey || "";

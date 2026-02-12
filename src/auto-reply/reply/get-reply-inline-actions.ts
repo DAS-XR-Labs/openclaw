@@ -158,10 +158,19 @@ export async function handleInlineActions(params: {
         }
       });
 
-      if (decision.action === 'BLOCK' || decision.action === 'REQUIRE_APPROVAL') {
+      if (decision.action === 'BLOCK') {
         const reason = decision.blockReason || 'Inline command blocked by policy.';
         typing.cleanup();
         return { kind: "reply", reply: { text: `🛡️ **Vicky Security**: ${reason}` } };
+      }
+
+      if (decision.action === 'REQUIRE_APPROVAL') {
+        const reason = decision.blockReason || 'Approval Required';
+        typing.cleanup();
+        return {
+          kind: "reply",
+          reply: { text: `🛡️ **Vicky Security**: ${reason}\nApproval ID: \`${decision.approvalId}\`` }
+        };
       }
     } catch (err) {
       // Fail Closed
@@ -228,11 +237,11 @@ export async function handleInlineActions(params: {
       const toolCallId = `cmd_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       try {
         // --- VICKY JIT RESTORE (INLINE ACTION PATH) ---
-        // Inline actions bypass plugin hooks, so tool args must be restored here.
-        // Only `command` contains user-provided text that may include placeholders.
+        // Note: rawArgs is currently a string, but we use recursive checking for future-proofing
+        // if args become structured/JSON.
         let restoredCommand = rawArgs;
         try {
-          const restored = await VickyClient.restore(rawArgs, sessionKey);
+          const restored = await VickyClient.restoreRecursive(rawArgs, sessionKey);
           restoredCommand = restored;
         } catch (restoreErr) {
           // Fail-closed for inline tool execution: don't run tools with placeholders.
