@@ -2,7 +2,6 @@
 import type { OpenClawPluginDefinition } from "./types.js";
 import { VickyClient, PolicyDeniedError } from "./vicky-client.js";
 
-const client = new VickyClient();
 
 const VickyPlugin: OpenClawPluginDefinition = {
     id: "vicky-gatekeeper",
@@ -37,22 +36,30 @@ const VickyPlugin: OpenClawPluginDefinition = {
         api.on("before_tool_call", async (event, ctx) => {
             const toolName = event.toolName;
             const args = event.params;
+            const sessionKey = ctx.sessionKey || ""; // Fix undefined sessionKey
 
             logger.debug(`[VickyPlugin] Checking permission for tool: ${toolName}`);
 
             try {
-                const decision = await client.checkPermission({
+                // 1. JIT Restore: Restore PII in arguments so the tool receives real values.
+                // We also check permission against the REAL values.
+                const restoredArgs = await VickyClient.restoreRecursive(args || {}, sessionKey);
+
+                const decision = await VickyClient.checkPermission({
                     toolName,
-                    arguments: args,
+                    arguments: restoredArgs,
                     metadata: {
                         agentId: ctx.agentId,
-                        sessionKey: ctx.sessionKey,
+                        sessionKey: sessionKey,
                     },
                 });
 
                 if (decision.action === "ALLOW") {
                     logger.debug(`[VickyPlugin] Allowed ${toolName} (${decision.tier})`);
-                    return;
+                    // Return the restored arguments to the tool runner
+                    return {
+                        params: restoredArgs,
+                    };
                 }
 
                 if (decision.action === "BLOCK") {
@@ -73,15 +80,12 @@ const VickyPlugin: OpenClawPluginDefinition = {
                     return {
                         block: true,
                         blockReason: `${reason} (Approval ID: ${approvalId})`,
-                        // We can attach custom metadata if the hook result type allows, 
-                        // but 'blockReason' is standard. We embed ID for visibility.
                     };
                 }
 
             } catch (err) {
                 logger.error(`[VickyPlugin] Error checking permission for ${toolName}: ${err}`);
-                // Fail-Closed on error (assuming critical/unknown state)
-                // If we want fail-open for LOW risk, we'd need that context.
+                // Fail-Closed on error
                 return {
                     block: true,
                     blockReason: "Security Gatekeeper Error (Fail-Closed)",

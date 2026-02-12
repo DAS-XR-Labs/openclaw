@@ -16,14 +16,15 @@ import { listSkillCommandsForWorkspace, resolveSkillCommandInvocation } from "..
 import { logVerbose } from "../../globals.js";
 import { createOpenClawTools } from "../../agents/openclaw-tools.js";
 import { resolveGatewayMessageChannel } from "../../utils/message-channel.js";
+import { VickyClient } from "../../plugins/vicky-client.js"; // Import Vicky Client
 
 export type InlineActionResult =
   | { kind: "reply"; reply: ReplyPayload | ReplyPayload[] | undefined }
   | {
-      kind: "continue";
-      directives: InlineDirectives;
-      abortedLastRun: boolean;
-    };
+    kind: "continue";
+    directives: InlineDirectives;
+    abortedLastRun: boolean;
+  };
 
 function extractTextFromToolResult(result: any): string | null {
   if (!result || typeof result !== "object") {
@@ -134,24 +135,61 @@ export async function handleInlineActions(params: {
   let directives = initialDirectives;
   let cleanedBody = initialCleanedBody;
 
+  // --- VICKY GATEKEEPER START ---
+  // Check permission for any potential inline execution
+  if (command.commandBodyNormalized.startsWith("/")) {
+    try {
+      // Parse simplistic argv for policy context
+      const argv = command.commandBodyNormalized.split(/\s+/);
+
+      const decision = await VickyClient.checkPermission({
+        toolName: 'inline_command',
+        arguments: {
+          command: command.commandBodyNormalized,
+          argv, // Pass parsed argv for cleaner policy matching
+          senderId: command.senderId,
+          channelId: command.channelId,
+          // teamId not available on CommandContext, omitting
+          requestId: ctx.MessageSid // Correct property for Message ID
+        },
+        metadata: {
+          agentId: agentId,
+          sessionKey: sessionKey
+        }
+      });
+
+      if (decision.action === 'BLOCK' || decision.action === 'REQUIRE_APPROVAL') {
+        const reason = decision.blockReason || 'Inline command blocked by policy.';
+        typing.cleanup();
+        return { kind: "reply", reply: { text: `🛡️ **Vicky Security**: ${reason}` } };
+      }
+    } catch (err) {
+      // Fail Closed
+      console.error('[Vicky] Inline Gate Error:', err);
+      typing.cleanup();
+      return { kind: "reply", reply: { text: `🛡️ **Vicky Security**: Authorization check failed. Execution halted.` } };
+    }
+  }
+  // --- VICKY GATEKEEPER END ---
+
   const shouldLoadSkillCommands = command.commandBodyNormalized.startsWith("/");
   const skillCommands =
     shouldLoadSkillCommands && params.skillCommands
       ? params.skillCommands
       : shouldLoadSkillCommands
         ? listSkillCommandsForWorkspace({
-            workspaceDir,
-            cfg,
-            skillFilter,
-          })
+          workspaceDir,
+          cfg,
+          skillFilter,
+        })
         : [];
 
   const skillInvocation =
     allowTextCommands && skillCommands.length > 0
       ? resolveSkillCommandInvocation({
-          commandBodyNormalized: command.commandBodyNormalized,
-          skillCommands,
-        })
+        commandBodyNormalized: command.commandBodyNormalized,
+        skillCommands,
+      })
       : null;
   if (skillInvocation) {
     if (!command.isAuthorizedSender) {
@@ -189,8 +227,27 @@ export async function handleInlineActions(params: {
 
       const toolCallId = `cmd_${Date.now()}_${Math.random().toString(16).slice(2)}`;
       try {
+        // --- VICKY JIT RESTORE (INLINE ACTION PATH) ---
+        // Inline actions bypass plugin hooks, so tool args must be restored here.
+        // Only `command` contains user-provided text that may include placeholders.
+        let restoredCommand = rawArgs;
+        try {
+          const restored = await VickyClient.restore(rawArgs, sessionKey);
+          restoredCommand = restored;
+        } catch (restoreErr) {
+          // Fail-closed for inline tool execution: don't run tools with placeholders.
+          const msg =
+            restoreErr instanceof Error ? restoreErr.message : String(restoreErr);
+          typing.cleanup();
+          return {
+            kind: "reply",
+            reply: { text: `🛡️ **Vicky Privacy**: restore failed. Tool execution halted. (${msg})` },
+          };
+        }
+        // --- END VICKY JIT RESTORE ---
+
         const result = await tool.execute(toolCallId, {
-          command: rawArgs,
+          command: restoredCommand,
           commandName: skillInvocation.command.name,
           skillName: skillInvocation.command.skillName,
         } as any);

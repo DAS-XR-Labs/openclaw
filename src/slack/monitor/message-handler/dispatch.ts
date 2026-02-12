@@ -12,6 +12,7 @@ import { removeSlackReaction } from "../../actions.js";
 import { resolveSlackThreadTargets } from "../../threading.js";
 
 import { createSlackReplyDeliveryPlan, deliverReplies } from "../replies.js";
+import { VickyClient } from "../../../plugins/vicky-client.js";
 
 import type { PreparedSlackMessage } from "./types.js";
 
@@ -104,9 +105,25 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
     responsePrefixContextProvider: prefixContext.responsePrefixContextProvider,
     humanDelay: resolveHumanDelayConfig(cfg, route.agentId),
     deliver: async (payload) => {
+      // VICKY RESTORE
+      let restoredPayload = payload;
+      if (payload.text) {
+        try {
+          // Use SessionKey from the prepared message context
+          const sessionKey = prepared.ctxPayload.SessionKey || "";
+          const restoredText = await VickyClient.restore(payload.text, sessionKey);
+          restoredPayload = { ...payload, text: restoredText };
+        } catch (err) {
+          // Log error but proceed. If restore fails, user sees placeholders.
+          // SAFETY: Do not log the payload or full error object to avoid PII leaks.
+          const msg = err instanceof Error ? err.message : "Unknown error";
+          runtime.error?.(danger(`Vicky restore failed on egress: ${msg}`));
+        }
+      }
+
       const replyThreadTs = replyPlan.nextThreadTs();
       await deliverReplies({
-        replies: [payload],
+        replies: [restoredPayload],
         target: prepared.replyTarget,
         token: ctx.botToken,
         accountId: account.accountId,

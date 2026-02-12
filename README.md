@@ -168,6 +168,7 @@ Run `openclaw doctor` to surface risky/misconfigured DM policies.
 - [Presence](https://docs.openclaw.ai/concepts/presence), [typing indicators](https://docs.openclaw.ai/concepts/typing-indicators), and [usage tracking](https://docs.openclaw.ai/concepts/usage-tracking).
 - [Models](https://docs.openclaw.ai/concepts/models), [model failover](https://docs.openclaw.ai/concepts/model-failover), and [session pruning](https://docs.openclaw.ai/concepts/session-pruning).
 - [Security](https://docs.openclaw.ai/gateway/security) and [troubleshooting](https://docs.openclaw.ai/channels/troubleshooting).
+- [Vicky Governance](https://github.com/MDykier/Vicky-Bot-Helper) — fail-closed operational gatekeeper and policy engine.
 
 ### Ops + packaging
 

@@ -41,6 +41,7 @@ import type { SlackMessageEvent } from "../../types.js";
 import { resolveSlackThreadContext } from "../../threading.js";
 
 import { resolveSlackAllowListMatch, resolveSlackUserAllowed } from "../allow-list.js";
+import { VickyClient } from "../../../plugins/vicky-client.js";
 import { resolveSlackEffectiveAllowFrom } from "../auth.js";
 import { resolveSlackChannelConfig } from "../channel-config.js";
 import { normalizeSlackChannelType, type SlackMonitorContext } from "../context.js";
@@ -77,11 +78,11 @@ export async function prepareSlackMessage(params: {
 
   const channelConfig = isRoom
     ? resolveSlackChannelConfig({
-        channelId: message.channel,
-        channelName,
-        channels: ctx.channelsConfig,
-        defaultRequireMention: ctx.defaultRequireMention,
-      })
+      channelId: message.channel,
+      channelName,
+      channels: ctx.channelsConfig,
+      defaultRequireMention: ctx.defaultRequireMention,
+    })
     : null;
 
   const allowBots =
@@ -152,8 +153,7 @@ export async function prepareSlackMessage(params: {
           });
           if (created) {
             logVerbose(
-              `slack pairing request sender=${directUserId} name=${
-                senderName ?? "unknown"
+              `slack pairing request sender=${directUserId} name=${senderName ?? "unknown"
               } (${allowMatchMeta})`,
             );
             try {
@@ -238,10 +238,10 @@ export async function prepareSlackMessage(params: {
 
   const channelUserAuthorized = isRoom
     ? resolveSlackUserAllowed({
-        allowList: channelConfig?.users,
-        userId: senderId,
-        userName: senderName,
-      })
+      allowList: channelConfig?.users,
+      userId: senderId,
+      userName: senderName,
+    })
     : true;
   if (isRoom && !channelUserAuthorized) {
     logVerbose(`Blocked unauthorized slack sender ${senderId} (not in channel users)`);
@@ -264,10 +264,10 @@ export async function prepareSlackMessage(params: {
   const channelCommandAuthorized =
     isRoom && channelUsersAllowlistConfigured
       ? resolveSlackUserAllowed({
-          allowList: channelConfig?.users,
-          userId: senderId,
-          userName: senderName,
-        })
+        allowList: channelConfig?.users,
+        userId: senderId,
+        userName: senderName,
+      })
       : false;
   const commandGate = resolveControlCommandGate({
     useAccessGroups: ctx.useAccessGroups,
@@ -323,11 +323,11 @@ export async function prepareSlackMessage(params: {
       limit: ctx.historyLimit,
       entry: pendingBody
         ? {
-            sender: senderName,
-            body: pendingBody,
-            timestamp: message.ts ? Math.round(Number(message.ts) * 1000) : undefined,
-            messageId: message.ts,
-          }
+          sender: senderName,
+          body: pendingBody,
+          timestamp: message.ts ? Math.round(Number(message.ts) * 1000) : undefined,
+          messageId: message.ts,
+        }
         : null,
     });
     return null;
@@ -338,7 +338,36 @@ export async function prepareSlackMessage(params: {
     token: ctx.botToken,
     maxBytes: ctx.mediaMaxBytes,
   });
-  const rawBody = (message.text ?? "").trim() || media?.placeholder || "";
+  const rawBodyInitial = (message.text ?? "").trim() || media?.placeholder || "";
+  let rawBody: string;
+  try {
+    rawBody = await VickyClient.anonymize(rawBodyInitial, sessionKey);
+  } catch (err) {
+    // Fail-Closed: Privacy Service Unavailable
+    // We must drop the message to prevent raw PII from reaching the agent.
+    // Ideally, we'd reply to the user here, but this function only prepares context.
+    // Logging is the best we can do for now, or we can side-effect a reply.
+    const msg = err instanceof Error ? err.message : "Unknown error";
+    logVerbose(`slack: dropped message due to Vicky anonymization failure: ${msg}`);
+
+    // Attempt to notify user of service outage (fire-and-forget)
+    try {
+      await sendMessageSlack(
+        message.channel,
+        "⚠️ **Privacy Shield Unavailable**: Message dropped for your security. Please try again later.",
+        {
+          token: ctx.botToken,
+          client: ctx.app.client,
+          accountId: account.accountId,
+        }
+      );
+    } catch (sendErr) {
+      // Ignore send error
+    }
+
+    return null;
+  }
+
   if (!rawBody) {
     return null;
   }
@@ -365,15 +394,15 @@ export async function prepareSlackMessage(params: {
   const ackReactionPromise =
     shouldAckReaction() && ackReactionMessageTs && ackReactionValue
       ? reactSlackMessage(message.channel, ackReactionMessageTs, ackReactionValue, {
-          token: ctx.botToken,
-          client: ctx.app.client,
-        }).then(
-          () => true,
-          (err) => {
-            logVerbose(`slack react failed for channel ${message.channel}: ${String(err)}`);
-            return false;
-          },
-        )
+        token: ctx.botToken,
+        client: ctx.app.client,
+      }).then(
+        () => true,
+        (err) => {
+          logVerbose(`slack react failed for channel ${message.channel}: ${String(err)}`);
+          return false;
+        },
+      )
       : null;
 
   const roomLabel = channelName ? `#${channelName}` : `#${message.channel}`;
@@ -431,9 +460,8 @@ export async function prepareSlackMessage(params: {
           channel: "Slack",
           from: roomLabel,
           timestamp: entry.timestamp,
-          body: `${entry.body}${
-            entry.messageId ? ` [id:${entry.messageId} channel:${message.channel}]` : ""
-          }`,
+          body: `${entry.body}${entry.messageId ? ` [id:${entry.messageId} channel:${message.channel}]` : ""
+            }`,
           chatType: "channel",
           senderLabel: entry.sender,
           envelope: envelopeOptions,
@@ -537,11 +565,11 @@ export async function prepareSlackMessage(params: {
     ctx: ctxPayload,
     updateLastRoute: isDirectMessage
       ? {
-          sessionKey: route.mainSessionKey,
-          channel: "slack",
-          to: `user:${message.user}`,
-          accountId: route.accountId,
-        }
+        sessionKey: route.mainSessionKey,
+        channel: "slack",
+        to: `user:${message.user}`,
+        accountId: route.accountId,
+      }
       : undefined,
     onRecordError: (err) => {
       ctx.logger.warn(
