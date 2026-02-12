@@ -9,10 +9,8 @@ import { resolveCommandStdio } from "./spawn-utils.js";
 
 import { VickyClient } from "../plugins/vicky-client.js";
 
-const vicky = new VickyClient();
-
 async function gateExec(command: string, args: string[]) {
-  const decision = await vicky.checkPermission({
+  const decision = await VickyClient.checkPermission({
     toolName: "exec",
     arguments: {
       argv: [command, ...args],
