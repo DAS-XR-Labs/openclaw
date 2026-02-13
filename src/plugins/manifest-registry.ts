@@ -6,6 +6,7 @@ import { normalizePluginsConfig, type NormalizedPluginsConfig } from "./config-s
 import { discoverOpenClawPlugins, type PluginCandidate } from "./discovery.js";
 import { loadPluginManifest, type PluginManifest } from "./manifest.js";
 import type { PluginConfigUiHint, PluginDiagnostic, PluginKind, PluginOrigin } from "./types.js";
+import VickyPlugin from "./vicky-plugin.js";
 
 export type PluginManifestRecord = {
   id: string;
@@ -129,16 +130,34 @@ export function loadPluginManifestRegistry(params: {
 
   const discovery = params.candidates
     ? {
-        candidates: params.candidates,
-        diagnostics: params.diagnostics ?? [],
-      }
+      candidates: params.candidates,
+      diagnostics: params.diagnostics ?? [],
+    }
     : discoverOpenClawPlugins({
-        workspaceDir: params.workspaceDir,
-        extraPaths: normalized.loadPaths,
-      });
+      workspaceDir: params.workspaceDir,
+      extraPaths: normalized.loadPaths,
+    });
   const diagnostics: PluginDiagnostic[] = [...discovery.diagnostics];
   const candidates: PluginCandidate[] = discovery.candidates;
   const records: PluginManifestRecord[] = [];
+
+  // Inject Vicky Manifest (Bundled)
+  records.push({
+    id: VickyPlugin.id!,
+    name: VickyPlugin.name,
+    description: VickyPlugin.description,
+    version: VickyPlugin.version,
+    kind: VickyPlugin.kind, // undefined in definition, but compatible with type
+    channels: [],
+    providers: [],
+    skills: [],
+    origin: "bundled",
+    rootDir: "",
+    source: "virtual:vicky-plugin",
+    manifestPath: "",
+    configSchema: VickyPlugin.configSchema?.jsonSchema as Record<string, unknown>,
+    configUiHints: VickyPlugin.configSchema?.uiHints,
+  });
   const seenIds = new Set<string>();
 
   for (const candidate of candidates) {

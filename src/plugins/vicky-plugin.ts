@@ -24,7 +24,7 @@ const VickyPlugin: OpenClawPluginDefinition = {
 
     activate: (api) => {
         const logger = api.logger;
-        const config = api.pluginConfig as { enabled?: boolean; vickyUrl?: string };
+        const config = (api.pluginConfig ?? {}) as { enabled?: boolean; vickyUrl?: string };
 
         if (config.enabled === false) {
             logger.info("[VickyPlugin] Disabled by configuration");
