@@ -111,7 +111,19 @@ export async function dispatchPreparedSlackMessage(prepared: PreparedSlackMessag
         try {
           // Use SessionKey from the prepared message context
           const sessionKey = prepared.ctxPayload.SessionKey || "";
+
+          if (shouldLogVerbose()) {
+            logVerbose(`[Vicky] Attempting restore for session ${sessionKey} (len=${payload.text.length})`);
+          }
+
           const restoredText = await VickyClient.restore(payload.text, sessionKey);
+
+          if (restoredText !== payload.text && shouldLogVerbose()) {
+            logVerbose(`[Vicky] Restored text successfully for session ${sessionKey}`);
+          } else if (shouldLogVerbose()) {
+            logVerbose(`[Vicky] Restore returned identical text (Session found? Match found?)`);
+          }
+
           restoredPayload = { ...payload, text: restoredText };
         } catch (err) {
           // Log error but proceed. If restore fails, user sees placeholders.
