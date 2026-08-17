@@ -88,14 +88,15 @@ RUN pnpm canvas:a2ui:bundle || \
      echo "/* A2UI bundle unavailable in this build */" > src/canvas-host/a2ui/a2ui.bundle.js && \
      echo "stub" > src/canvas-host/a2ui/.bundle.hash && \
      rm -rf vendor/a2ui apps/shared/OpenClawKit/Tools/CanvasA2UI)
-# Append short git SHA to package.json version when OPENCLAW_VERSION_SUFFIX is set.
-# CI passes the full commit SHA; we take the first 7 characters.
-# Result: "version": "2026.3.14-04aadd0" in the built dist/package.json.
-ARG OPENCLAW_VERSION_SUFFIX=""
-RUN if [ -n "$OPENCLAW_VERSION_SUFFIX" ]; then \
-      short_sha="$(printf '%.7s' "$OPENCLAW_VERSION_SUFFIX")" && \
-      node -e "const p=require('./package.json'); p.version+='-'+process.argv[1]; require('fs').writeFileSync('package.json',JSON.stringify(p,null,2)+'\\n')" "$short_sha"; \
-    fi
+# Bake the commit SHA into the image at build time so the version string
+# baked into dist/build-info.json (and shown in the CLI banner/status line
+# as "OpenClaw <version> (<commit>)") is fixed for this image and identical
+# across every container started from it. Do NOT resolve this from git at
+# container startup or mutate package.json's own version field with it --
+# either would make the same image tag show a different string per instance
+# depending on local/runtime git state. CI passes the full commit SHA.
+ARG OPENCLAW_GIT_COMMIT=""
+ENV GIT_COMMIT=${OPENCLAW_GIT_COMMIT}
 RUN pnpm build:docker
 # Force pnpm for UI build (Bun may fail on ARM/Synology architectures)
 ENV OPENCLAW_PREFER_PNPM=1
@@ -121,6 +122,14 @@ LABEL org.opencontainers.image.base.name="docker.io/library/node:24-bookworm-sli
 # ── Stage 3: Runtime ────────────────────────────────────────────
 FROM base-${OPENCLAW_VARIANT}
 ARG OPENCLAW_VARIANT
+
+# Re-declare (build ARGs don't cross the stage boundary) and bake as an
+# immutable image ENV, matching the build stage's commit stamp. This makes
+# GIT_COMMIT part of the image config itself (see `docker inspect`), so
+# resolveCommitHash() (src/infra/git-commit.ts) resolves the same value on
+# every container run from this image without touching git at startup.
+ARG OPENCLAW_GIT_COMMIT=""
+ENV GIT_COMMIT=${OPENCLAW_GIT_COMMIT}
 
 # OCI base-image metadata for downstream image consumers.
 # If you change these annotations, also update:

@@ -123,7 +123,7 @@ jobs:
           context: .
           platforms: linux/amd64
           build-args: |
-            OPENCLAW_VERSION_SUFFIX=${{ github.sha }}
+            OPENCLAW_GIT_COMMIT=${{ github.sha }}
           tags: ${{ steps.tags.outputs.value }}
           labels: ${{ steps.labels.outputs.value }}
           provenance: false
@@ -137,7 +137,7 @@ jobs:
           platforms: linux/amd64
           build-args: |
             OPENCLAW_VARIANT=slim
-            OPENCLAW_VERSION_SUFFIX=${{ github.sha }}
+            OPENCLAW_GIT_COMMIT=${{ github.sha }}
           tags: ${{ steps.tags.outputs.slim }}
           labels: ${{ steps.labels.outputs.value }}
           provenance: false
