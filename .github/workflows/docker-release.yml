@@ -57,13 +57,20 @@ jobs:
           set -euo pipefail
           tags=()
           slim_tags=()
+          # -------------------------------------------------------
+          # Branch / tag -> Docker tag mapping (source of truth)
+          #   clawboss     -> :stable  :latest  (+ -amd64 / -slim variants)
+          #   clawboss-dev -> :dev              (+ -amd64 / -slim variants)
+          #   main         -> :main             (+ -amd64 / -slim variants)
+          #   v*           -> :VERSION :latest  (semver only; slim -> :slim)
+          # -------------------------------------------------------
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             tags+=("${IMAGE}:main-amd64")
             slim_tags+=("${IMAGE}:main-slim-amd64")
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/clawboss" ]]; then
-            tags+=("${IMAGE}:stable-amd64")
-            slim_tags+=("${IMAGE}:stable-slim-amd64")
+            tags+=("${IMAGE}:stable-amd64" "${IMAGE}:latest-amd64")
+            slim_tags+=("${IMAGE}:stable-slim-amd64" "${IMAGE}:latest-slim-amd64")
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/clawboss-dev" ]]; then
             tags+=("${IMAGE}:dev-amd64")
@@ -170,13 +177,20 @@ jobs:
           set -euo pipefail
           tags=()
           slim_tags=()
+          # -------------------------------------------------------
+          # Branch / tag -> Docker tag mapping (source of truth)
+          #   clawboss     -> :stable  :latest  (+ -slim variants)
+          #   clawboss-dev -> :dev              (+ -slim variants)
+          #   main         -> :main             (+ -slim variants)
+          #   v*           -> :VERSION :latest  (semver only; slim -> :slim)
+          # -------------------------------------------------------
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             tags+=("${IMAGE}:main")
             slim_tags+=("${IMAGE}:main-slim")
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/clawboss" ]]; then
-            tags+=("${IMAGE}:stable")
-            slim_tags+=("${IMAGE}:stable-slim")
+            tags+=("${IMAGE}:stable" "${IMAGE}:latest")
+            slim_tags+=("${IMAGE}:stable-slim" "${IMAGE}:slim")
           fi
           if [[ "${GITHUB_REF}" == "refs/heads/clawboss-dev" ]]; then
             tags+=("${IMAGE}:dev")
